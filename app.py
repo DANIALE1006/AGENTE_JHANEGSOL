@@ -5,7 +5,7 @@ import os
 import runpy
 import sys
 
-RAIZ = os.path.dirname(os.path.abspath(_file_))
+RAIZ = os.path.dirname(os.path.abspath(sys.argv[0]))
 NOMBRE = "INVENTARIO-JHANEGSOL-OK.py"
 
 candidatos = [os.path.join(RAIZ, NOMBRE)] + glob.glob(os.path.join(RAIZ, "*", NOMBRE))
@@ -19,4 +19,4 @@ os.chdir(CARPETA)
 if CARPETA not in sys.path:
     sys.path.insert(0, CARPETA)
 
-runpy.run_path(principal, run_name="_main_")
+runpy.run_path(principal)
