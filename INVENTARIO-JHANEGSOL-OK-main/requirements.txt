@@ -1,0 +1,8 @@
+streamlit
+supabase
+pandas
+reportlab
+Pillow
+pypdfium2
+plotly
+anthropic
