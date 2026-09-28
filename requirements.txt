@@ -7,3 +7,4 @@ pypdfium2
 plotly
 anthropic
 openai
+requests
