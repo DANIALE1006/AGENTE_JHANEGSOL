@@ -1,7 +1,7 @@
 """
 Cerebro del Agente Jhanegsol IA.
 
-- Modo IA: usa Claude (API de Anthropic) con herramientas (tool use).
+- Modo IA: usa Groq (GROQ_API_KEY) o Claude (ANTHROPIC_API_KEY) con herramientas (tool use).
 - Modo local: si no hay API key, interpreta la pregunta con palabras clave
   y ejecuta la herramienta adecuada. Funciona gratis y sin internet externo.
 """
@@ -15,6 +15,8 @@ from typing import Any, Dict, List, Tuple
 from services.agent_tools import TOOL_SPECS, ejecutar_herramienta
 
 MODELO_POR_DEFECTO = "claude-haiku-4-5"
+MODELO_GROQ_POR_DEFECTO = "openai/gpt-oss-120b"
+GROQ_BASE_URL = "https://api.groq.com/openai/v1"
 
 ESTILOS = {
     "🎓 Didáctico": "Explica como un profesor paciente: define los conceptos (margen, rotación, punto de reorden) "
@@ -43,14 +45,25 @@ def _secreto(nombre: str) -> str:
     return os.getenv(nombre, "")
 
 
+def proveedor_ia() -> str:
+    """Devuelve 'groq', 'anthropic' o '' segun las claves configuradas en Secrets."""
+    if _secreto("GROQ_API_KEY"):
+        try:
+            import openai  # noqa: F401
+            return "groq"
+        except ImportError:
+            pass
+    if _secreto("ANTHROPIC_API_KEY"):
+        try:
+            import anthropic  # noqa: F401
+            return "anthropic"
+        except ImportError:
+            pass
+    return ""
+
+
 def ia_disponible() -> bool:
-    if not _secreto("ANTHROPIC_API_KEY"):
-        return False
-    try:
-        import anthropic  # noqa: F401
-        return True
-    except ImportError:
-        return False
+    return proveedor_ia() != ""
 
 
 # ─────────────────────────── MODO IA (Claude) ───────────────────────────
@@ -82,87 +95,4 @@ def responder_con_ia(historial: List[Dict[str, str]], estilo: str) -> Tuple[str,
         resultados = []
         for bloque in resp.content:
             if bloque.type == "tool_use":
-                r = ejecutar_herramienta(bloque.name, bloque.input)
-                usados.append({"nombre": bloque.name, "args": bloque.input, "resultado": r})
-                resultados.append({"type": "tool_result", "tool_use_id": bloque.id, "content": _para_modelo(r)})
-        mensajes.append({"role": "user", "content": resultados})
-    return "Consulté varias fuentes pero no llegué a una conclusión. ¿Puedes precisar la pregunta?", usados
-
-
-# ─────────────────────────── MODO LOCAL ───────────────────────────
-
-def _norm(t: str) -> str:
-    t = unicodedata.normalize("NFD", t.lower())
-    return "".join(c for c in t if unicodedata.category(c) != "Mn")
-
-
-REGLAS = [
-    ("sugerir_reposicion", ["repon", "pedir", "pedido", "comprar", "reorden", "abastec"]),
-    ("productos_bajo_stock", ["bajo stock", "agot", "quiebre", "falta", "minimo", "alerta", "critico"]),
-    ("analisis_abc", ["abc", "pareto", "importantes", "clasific"]),
-    ("productos_sin_movimiento", ["sin movimiento", "no se vend", "inmoviliz", "parado", "estancad", "quieto"]),
-    ("analisis_margenes", ["margen", "ganancia por", "rentab", "perdida", "utilidad"]),
-    ("top_clientes", ["cliente"]),
-    ("top_productos", ["mas vendid", "top", "mejor vend", "estrella", "populares"]),
-    ("resumen_inventario", ["inventario", "almacen", "valor del stock", "cuanto tengo", "general"]),
-    ("resumen_ventas", ["venta", "vendimos", "factur", "ingreso", "ticket", "hoy", "semana", "mes"]),
-]
-
-
-def _extraer_dias(texto: str) -> int | None:
-    t = _norm(texto)
-    if "hoy" in t:
-        return 1
-    if "semana" in t:
-        return 7
-    m = re.search(r"(\d+)\s*(dia|mes|año|ano)", t)
-    if m:
-        n = int(m.group(1))
-        return n * 30 if m.group(2) == "mes" else n * 365 if m.group(2) in ("año", "ano") else n
-    if "mes" in t:
-        return 30
-    if "trimestre" in t:
-        return 90
-    return None
-
-
-def interpretar_local(pregunta: str) -> Tuple[str, Dict[str, Any]]:
-    t = _norm(pregunta)
-    m = re.search(r"(?:busca|buscar|precio de|stock de|informacion de)\s+(.+)", t)
-    if m and not any(k in t for k in ["bajo stock", "sin movimiento"]):
-        return "buscar_producto", {"texto": m.group(1).strip(" ?¿.!")}
-    for herramienta, claves in REGLAS:
-        if any(k in t for k in claves):
-            args: Dict[str, Any] = {}
-            dias = _extraer_dias(pregunta)
-            if dias and herramienta in ("resumen_ventas", "top_productos", "analisis_abc",
-                                        "productos_sin_movimiento", "top_clientes"):
-                args["dias"] = dias
-            return herramienta, args
-    return "", {}
-
-
-def responder_local(pregunta: str) -> Tuple[str, List[Dict[str, Any]]]:
-    herramienta, args = interpretar_local(pregunta)
-    if not herramienta:
-        return ("🤔 En **modo local** entiendo preguntas sobre: *inventario, stock bajo, ventas, más vendidos, "
-                "clientes, márgenes, análisis ABC, productos sin movimiento, reposición* o *buscar <producto>*. "
-                "Prueba con uno de los botones de acceso rápido 👆"), []
-    r = ejecutar_herramienta(herramienta, args)
-    texto = f"### {r.get('titulo', '')}\n{r.get('resumen', '')}"
-    if r.get("consejo"):
-        texto += f"\n\n> 💡 **Dato para aprender:** {r['consejo']}"
-    return texto, [{"nombre": herramienta, "args": args, "resultado": r}]
-
-
-def responder(historial: List[Dict[str, str]], estilo: str, usar_ia: bool) -> Tuple[str, List[Dict[str, Any]], str]:
-    """Devuelve (texto, herramientas_usadas, modo)."""
-    if usar_ia and ia_disponible():
-        try:
-            texto, usados = responder_con_ia(historial, estilo)
-            return texto, usados, "ia"
-        except Exception as e:
-            texto, usados = responder_local(historial[-1]["content"])
-            return f"⚠️ La IA no respondió ({type(e).__name__}); uso el modo local.\n\n{texto}", usados, "local"
-    texto, usados = responder_local(historial[-1]["content"])
-    return texto, usados, "local"
+                r = ejecutar_herramienta(bloque.name, bloque.
