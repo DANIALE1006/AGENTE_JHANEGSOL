@@ -9,7 +9,11 @@ Cada herramienta devuelve un diccionario con:
   consejo  -> explicación didáctica del concepto usado (opcional)
 """
 from __future__ import annotations
+import os
+import smtplib
 from datetime import date, timedelta
+from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
 from typing import Any, Callable, Dict, List
 
 import pandas as pd
@@ -17,6 +21,9 @@ import pandas as pd
 from services.agent_data import cargar_comprobantes, cargar_detalle_ventas, cargar_productos, TIPOS_VENTA
 
 Resultado = Dict[str, Any]
+
+# Destinatario fijo por defecto
+CORREO_DESTINO = "0331221020@unjfsc.edu.pe"
 
 
 def _s(v: float) -> str:
@@ -39,6 +46,44 @@ def _demanda_diaria(dias: int = 30) -> pd.Series:
 
 
 # ─────────────────────────── HERRAMIENTAS ───────────────────────────
+
+def enviar_correo_gmail(asunto: str, cuerpo: str, destinatario: str = CORREO_DESTINO) -> Resultado:
+    """Envía un correo electrónico a través de Gmail mediante SMTP."""
+    smtp_server = os.getenv("SMTP_SERVER", "smtp.gmail.com")
+    smtp_port = int(os.getenv("SMTP_PORT", 587))
+    smtp_user = os.getenv("SMTP_USER", "danielaalejandramv@gmail.com")
+    smtp_password = os.getenv("SMTP_PASSWORD")
+
+    if not smtp_password:
+        return {
+            "titulo": "Envío de correo",
+            "resumen": "❌ Error: No se ha configurado la contraseña de aplicación (SMTP_PASSWORD) en las variables de entorno."
+        }
+
+    destinatario_final = destinatario or CORREO_DESTINO
+
+    msg = MIMEMultipart()
+    msg['From'] = smtp_user
+    msg['To'] = destinatario_final
+    msg['Subject'] = asunto
+    msg.attach(MIMEText(cuerpo, 'plain', 'utf-8'))
+
+    try:
+        server = smtplib.SMTP(smtp_server, smtp_port)
+        server.starttls()
+        server.login(smtp_user, smtp_password)
+        server.sendmail(smtp_user, destinatario_final, msg.as_string())
+        server.quit()
+        return {
+            "titulo": "Envío de correo",
+            "resumen": f"✅ Correo enviado exitosamente a {destinatario_final} con el asunto: '{asunto}'."
+        }
+    except Exception as e:
+        return {
+            "titulo": "Envío de correo",
+            "resumen": f"❌ No se pudo enviar el correo a {destinatario_final}: {e}"
+        }
+
 
 def resumen_inventario() -> Resultado:
     df = cargar_productos()
@@ -250,7 +295,7 @@ def top_clientes(limite: int = 10, dias: int = 180) -> Resultado:
     desde = date.today() - timedelta(days=int(dias))
     v = comp[(comp["tipo_comprobante"].isin(TIPOS_VENTA)) & (comp["fecha"] >= desde)]
     g = (v.groupby("cliente_nombre").agg(compras=("id", "count"), monto=("total", "sum"),
-                                          ultima=("fecha", "max"))
+                                         ultima=("fecha", "max"))
           .reset_index().sort_values("monto", ascending=False).head(int(limite)))
     if g.empty:
         return {"titulo": "Clientes", "resumen": f"Sin ventas en {dias} días."}
@@ -268,6 +313,7 @@ def top_clientes(limite: int = 10, dias: int = 180) -> Resultado:
 # ─────────────────────────── REGISTRO ───────────────────────────
 
 HERRAMIENTAS: Dict[str, Callable[..., Resultado]] = {
+    "enviar_correo_gmail": enviar_correo_gmail,
     "resumen_inventario": resumen_inventario,
     "productos_bajo_stock": productos_bajo_stock,
     "buscar_producto": buscar_producto,
@@ -282,6 +328,19 @@ HERRAMIENTAS: Dict[str, Callable[..., Resultado]] = {
 
 _INT = {"type": "integer"}
 TOOL_SPECS = [
+    {
+        "name": "enviar_correo_gmail",
+        "description": "Envía un correo electrónico mediante Gmail (notificaciones, reportes de ventas, alertas de stock).",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "asunto": {"type": "string", "description": "Asunto del correo electrónico."},
+                "cuerpo": {"type": "string", "description": "Contenido o texto del mensaje a enviar."},
+                "destinatario": {"type": "string", "description": "Correo del destinatario (por defecto: 0331221020@unjfsc.edu.pe)."}
+            },
+            "required": ["asunto", "cuerpo"]
+        }
+    },
     {"name": "resumen_inventario", "description": "Resumen general: productos, unidades, valor a costo y venta, alertas.",
      "input_schema": {"type": "object", "properties": {}}},
     {"name": "productos_bajo_stock", "description": "Productos agotados o por debajo del stock mínimo.",
