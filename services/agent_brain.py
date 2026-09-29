@@ -20,7 +20,7 @@ GROQ_BASE_URL = "https://api.groq.com/openai/v1"
 
 ESTILOS = {
     "🎓 Didáctico": "Explica como un profesor paciente: define los conceptos (margen, rotación, punto de reorden) "
-                   "con ejemplos sencillos usando los datos reales, y termina con un 'Dato para aprender'.",
+                    "con ejemplos sencillos usando los datos reales, y termina con un 'Dato para aprender'.",
     "💼 Ejecutivo": "Responde como un gerente: máximo 5 líneas, cifras clave y una acción concreta.",
     "🔍 Detallado": "Responde como un analista: desglosa cifras, compara, señala riesgos y da 3 recomendaciones.",
 }
@@ -28,8 +28,9 @@ ESTILOS = {
 SYSTEM_BASE = """Eres "Jhani", el agente de inteligencia comercial de JHANEGSOL S.A.C. (Huacho, Perú).
 Ayudas a gestionar inventario, ventas, compras y clientes. Moneda: soles (S/). Los precios incluyen IGV 18%.
 Reglas:
-- Usa SIEMPRE las herramientas para obtener datos; nunca inventes cifras.
-- Eres de solo lectura: no puedes registrar ventas ni modificar stock. Si te lo piden, indica el módulo del sistema que deben usar.
+- Usa SIEMPRE las herramientas para obtener datos o realizar acciones (como enviar correos); nunca inventes cifras.
+- Eres de solo lectura en base de datos: no puedes registrar ventas ni modificar stock. Si te lo piden, indica el módulo del sistema que deben usar.
+- Si el usuario te pide enviar un correo, reporte o notificación por email, usa la herramienta `enviar_correo_gmail`.
 - Responde en español, con formato Markdown breve y emojis moderados.
 - Cierra con una sugerencia de siguiente pregunta útil.
 Estilo pedido: {estilo}"""
@@ -153,6 +154,7 @@ def _norm(t: str) -> str:
 
 
 REGLAS = [
+    ("enviar_correo_gmail", ["enviar correo", "manda correo", "enviar email", "mandar email", "envia un correo", "manda un correo", "notificar correo"]),
     ("sugerir_reposicion", ["repon", "pedir", "pedido", "comprar", "reorden", "abastec"]),
     ("productos_bajo_stock", ["bajo stock", "agot", "quiebre", "falta", "minimo", "alerta", "critico"]),
     ("analisis_abc", ["abc", "pareto", "importantes", "clasific"]),
@@ -184,6 +186,13 @@ def _extraer_dias(texto: str) -> int | None:
 
 def interpretar_local(pregunta: str) -> Tuple[str, Dict[str, Any]]:
     t = _norm(pregunta)
+    
+    # Detección especial para envío de correo en Modo Local
+    if any(k in t for k in ["correo", "email", "mail"]):
+        asunto = "Notificación del Agente Jhanegsol"
+        cuerpo = f"Mensaje generado automáticamente a partir de tu consulta: '{pregunta}'."
+        return "enviar_correo_gmail", {"asunto": asunto, "cuerpo": cuerpo}
+
     m = re.search(r"(?:busca|buscar|precio de|stock de|informacion de)\s+(.+)", t)
     if m and not any(k in t for k in ["bajo stock", "sin movimiento"]):
         return "buscar_producto", {"texto": m.group(1).strip(" ?¿.!")}
@@ -202,7 +211,7 @@ def responder_local(pregunta: str) -> Tuple[str, List[Dict[str, Any]]]:
     herramienta, args = interpretar_local(pregunta)
     if not herramienta:
         return ("🤔 En **modo local** entiendo preguntas sobre: *inventario, stock bajo, ventas, más vendidos, "
-                "clientes, márgenes, análisis ABC, productos sin movimiento, reposición* o *buscar <producto>*. "
+                "clientes, márgenes, análisis ABC, productos sin movimiento, reposición, enviar correo* o *buscar <producto>*. "
                 "Prueba con uno de los botones de acceso rápido 👆"), []
     r = ejecutar_herramienta(herramienta, args)
     texto = f"### {r.get('titulo', '')}\n{r.get('resumen', '')}"
