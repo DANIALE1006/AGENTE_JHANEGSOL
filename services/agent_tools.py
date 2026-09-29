@@ -48,9 +48,9 @@ def _demanda_diaria(dias: int = 30) -> pd.Series:
 # ─────────────────────────── HERRAMIENTAS ───────────────────────────
 
 def enviar_correo_gmail(asunto: str, cuerpo: str, destinatario: str = CORREO_DESTINO) -> Resultado:
-    """Envía un correo electrónico a través de Gmail mediante SMTP."""
+    """Envía un correo electrónico a través de Gmail mediante SMTP con conexión segura SSL (Puerto 465)."""
     smtp_server = os.getenv("SMTP_SERVER", "smtp.gmail.com")
-    smtp_port = int(os.getenv("SMTP_PORT", 587))
+    smtp_port = int(os.getenv("SMTP_PORT", 465))
     smtp_user = os.getenv("SMTP_USER", "danielaalejandramv@gmail.com")
     smtp_password = os.getenv("SMTP_PASSWORD")
 
@@ -69,8 +69,13 @@ def enviar_correo_gmail(asunto: str, cuerpo: str, destinatario: str = CORREO_DES
     msg.attach(MIMEText(cuerpo, 'plain', 'utf-8'))
 
     try:
-        server = smtplib.SMTP(smtp_server, smtp_port)
-        server.starttls()
+        # Usa SMTP_SSL para el puerto 465 o fallback a SMTP + STARTTLS para puerto 587
+        if smtp_port == 465:
+            server = smtplib.SMTP_SSL(smtp_server, smtp_port, timeout=15)
+        else:
+            server = smtplib.SMTP(smtp_server, smtp_port, timeout=15)
+            server.starttls()
+
         server.login(smtp_user, smtp_password)
         server.sendmail(smtp_user, destinatario_final, msg.as_string())
         server.quit()
